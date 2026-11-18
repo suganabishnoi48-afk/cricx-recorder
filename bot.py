@@ -1,23 +1,19 @@
 import os
 import subprocess
 import asyncio
-from flask import Flask, request
+from flask import Flask
 from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# Flask Web Server
+# Flask web server taaki Render ki Web Service active rahe
 app = Flask(__name__)
-
-TOKEN = "9125619030:AAEG6FMEEqr5IDtgWxZpOl6rZhZPWax4FZ0"
 
 @app.route('/')
 def home():
     return "CricX Recorder Bot is running 24/7!"
 
-@app.route(f"/{TOKEN}", methods=["POST"])
-def webhook():
-    # Telegram se aane wale updates ko handle karne ke liye
-    return "OK", 200
+# Telegram Bot Token
+TOKEN = "9125619030:AAEG6FMEEqr5IDtgWxZpOl6rZhZPWax4FZ0"
 
 RECORDING_ACTIVE = False
 STREAM_URL = ""
@@ -108,9 +104,24 @@ async def stop_record(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("Koi active recording nahi chal rahi hai.")
 
-def main():
+def run_flask():
     port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port, use_reloader=False)
+
+def main():
+    # Flask ko alag thread me chalao taaki web service khush rahe
+    import threading
+    t = threading.Thread(target=run_flask)
+    t.daemon = True
+    t.start()
+    
+    # Telegram Bot ko start karo
+    bot_app = ApplicationBuilder().token(TOKEN).build()
+    bot_app.add_handler(CommandHandler("record", start_record))
+    bot_app.add_handler(CommandHandler("stop", stop_record))
+    
+    print("Bot is starting polling...")
+    bot_app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
