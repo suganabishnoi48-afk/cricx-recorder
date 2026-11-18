@@ -1,41 +1,30 @@
 import os
 import subprocess
-import asyncio
-from flask import Flask, request
+import threading
+import time
+from flask import Flask
 from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
+# Flask server taaki Render ki Web Service khush rahe aur UptimeRobot isko ping kar sake
 app = Flask(__name__)
-
-# Naya Verified Telegram Bot Token
-TOKEN = "9125619030:AAF4ehJkVHGYH_AEYnljgOYOllyyM0I1O7Q"
-WEBHOOK_URL = f"https://cricx-recorder.onrender.com/{TOKEN}"
-
-telegram_app = None
 
 @app.route('/')
 def home():
-    return "CricX Recorder Bot is running 24/7 successfully!"
+    return "CricX Recorder Bot is running 24/7!"
 
-@app.route(f"/{TOKEN}", methods=["POST"])
-def webhook():
-    try:
-        json_data = request.get_json(force=True)
-        update = Update.de_json(json_data, telegram_app.bot)
-        asyncio.run(telegram_app.process_update(update))
-    except Exception as e:
-        print(f"Webhook error: {e}")
-    return "OK", 200
+# Naya Verified Telegram Bot Token
+TOKEN = "9125619030:AAF4ehJkVHGYH_AEYnljgOYOllyyM0I1O7Q"
 
 RECORDING_ACTIVE = False
 STREAM_URL = ""
 CHAT_ID = None
 DURATION_SECONDS = 3600
 
-async def record_loop(context: ContextTypes.DEFAULT_TYPE):
-    global RECORDING_ACTIVE, STREAM_URL, CHAT_ID, DURATION_SECONDS
-    
+def record_process():
+    global RECORDING_ACTIVE, STREAM_URL, DURATION_SECONDS
     part_num = 1
+    
     while RECORDING_ACTIVE:
         output_file = f"match_part_{part_num}.mp4"
         
@@ -57,24 +46,12 @@ async def record_loop(context: ContextTypes.DEFAULT_TYPE):
             if not RECORDING_ACTIVE:
                 process.terminate()
                 break
-            await asyncio.sleep(5)
+            time.sleep(2)
             
         if not RECORDING_ACTIVE:
             if os.path.exists(output_file):
                 os.remove(output_file)
             break
-            
-        if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
-            try:
-                await context.bot.send_document(
-                    chat_id=CHAT_ID,
-                    document=open(output_file, "rb"),
-                    caption=f"✅ CricXAbhi Match Part {part_num} uploaded successfully!"
-                )
-            except Exception as e:
-                print(f"Upload error: {e}")
-            
-            os.remove(output_file)
             
         part_num += 1
 
@@ -83,7 +60,7 @@ async def start_record(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     
     if len(args) < 1:
-        await update.message.reply_text("❌ Bhai sahi tarika ye hai:\n`/record <m3u8_link> <minutes>`\nExample: `/record https://...m3u8 60`")
+        await update.message.reply_text("❌ Sahi tarika ye hai:\n`/record <m3u8_link> <minutes>`")
         return
         
     if RECORDING_ACTIVE:
@@ -106,30 +83,36 @@ async def start_record(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(f"🚀 Recording shuru ho gayi hai!\n⏱️ Timer: {DURATION_SECONDS // 60} minutes per part.\nRokne ke liye `/stop` bhejein.")
     
-    asyncio.create_task(record_loop(context))
+    # Background me recording thread chalu karo
+    t = threading.Thread(target=record_process)
+    t.daemon = True
+    t.start()
 
 async def stop_record(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global RECORDING_ACTIVE
     if RECORDING_ACTIVE:
         RECORDING_ACTIVE = False
-        await update.message.reply_text("⏹️ Recording roki ja rahi hai... Current part upload hone ke baad bot band ho jayega.")
+        await update.message.reply_text("⏹️ Recording roki ja rahi hai...")
     else:
         await update.message.reply_text("Koi active recording nahi chal rahi hai.")
 
-def setup_bot():
-    global telegram_app
-    telegram_app = Application.builder().token(TOKEN).build()
-    telegram_app.add_handler(CommandHandler("record", start_record))
-    telegram_app.add_handler(CommandHandler("stop", stop_record))
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port, use_reloader=False)
+
+def main():
+    # Flask ko alag thread me start karo
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
     
-    async def set_wh():
-        await telegram_app.initialize()
-        await telegram_app.bot.set_webhook(url=WEBHOOK_URL)
-        await telegram_app.start()
+    # Telegram Bot Polling start karo
+    bot_app = ApplicationBuilder().token(TOKEN).build()
+    bot_app.add_handler(CommandHandler("record", start_record))
+    bot_app.add_handler(CommandHandler("stop", stop_record))
     
-    asyncio.run(set_wh())
+    print("Bot polling started successfully...")
+    bot_app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
-    setup_bot()
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    main()
