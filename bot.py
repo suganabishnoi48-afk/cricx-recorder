@@ -6,15 +6,14 @@ from flask import Flask
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# Flask server taaki Render ki Web Service khush rahe aur UptimeRobot isko ping kar sake
 app = Flask(__name__)
 
 @app.route('/')
 def home():
     return "CricX Recorder Bot is running 24/7!"
 
-# Naya Verified Telegram Bot Token
-TOKEN = "9125619030:AAF4ehJkVHGYH_AEYnljgOYOllyyM0I1O7Q"
+# Render ke environment variable se token uthayega
+TOKEN = os.environ.get("BOT_TOKEN")
 
 RECORDING_ACTIVE = False
 STREAM_URL = ""
@@ -83,7 +82,6 @@ async def start_record(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(f"🚀 Recording shuru ho gayi hai!\n⏱️ Timer: {DURATION_SECONDS // 60} minutes per part.\nRokne ke liye `/stop` bhejein.")
     
-    # Background me recording thread chalu karo
     t = threading.Thread(target=record_process)
     t.daemon = True
     t.start()
@@ -101,12 +99,14 @@ def run_flask():
     app.run(host="0.0.0.0", port=port, use_reloader=False)
 
 def main():
-    # Flask ko alag thread me start karo
+    if not TOKEN:
+        print("ERROR: BOT_TOKEN environment variable not set!")
+        return
+
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
     
-    # Telegram Bot Polling start karo
     bot_app = ApplicationBuilder().token(TOKEN).build()
     bot_app.add_handler(CommandHandler("record", start_record))
     bot_app.add_handler(CommandHandler("stop", stop_record))
