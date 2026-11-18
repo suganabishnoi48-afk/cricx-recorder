@@ -1,19 +1,33 @@
 import os
 import subprocess
 import asyncio
-from flask import Flask
+from flask import Flask, request
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, ContextTypes
 
-# Flask web server taaki Render ki Web Service active rahe
 app = Flask(__name__)
+
+TOKEN = "9125619030:AAEG6FMEEqr5IDtgWxZpOl6rZhZPWax4FZ0"
+WEBHOOK_URL = f"https://cricx-recorder.onrender.com/{TOKEN}"
+
+# Global telegram application instance
+telegram_app = None
 
 @app.route('/')
 def home():
-    return "CricX Recorder Bot is running 24/7!"
+    return "CricX Recorder Bot is running 24/7 via Webhook!"
 
-# Telegram Bot Token
-TOKEN = "9125619030:AAEG6FMEEqr5IDtgWxZpOl6rZhZPWax4FZ0"
+@app.route(f"/{TOKEN}", methods=["POST"])
+def webhook():
+    try:
+        json_data = request.get_json(force=True)
+        update = Update.de_json(json_data, telegram_app.bot)
+        
+        # Asyncio event loop me update process karo
+        asyncio.run(telegram_app.process_update(update))
+    except Exception as e:
+        print(f"Webhook error: {e}")
+    return "OK", 200
 
 RECORDING_ACTIVE = False
 STREAM_URL = ""
@@ -104,24 +118,22 @@ async def stop_record(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("Koi active recording nahi chal rahi hai.")
 
-def run_flask():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port, use_reloader=False)
-
-def main():
-    # Flask ko alag thread me chalao taaki web service khush rahe
-    import threading
-    t = threading.Thread(target=run_flask)
-    t.daemon = True
-    t.start()
+def setup_bot():
+    global telegram_app
+    telegram_app = Application.builder().token(TOKEN).build()
+    telegram_app.add_handler(CommandHandler("record", start_record))
+    telegram_app.add_handler(CommandHandler("stop", stop_record))
     
-    # Telegram Bot ko start karo
-    bot_app = ApplicationBuilder().token(TOKEN).build()
-    bot_app.add_handler(CommandHandler("record", start_record))
-    bot_app.add_handler(CommandHandler("stop", stop_record))
+    # Telegram ko webhook set kar do
+    async def set_wh():
+        await telegram_app.initialize()
+        await telegram_app.bot.set_webhook(url=WEBHOOK_URL)
+        await telegram_app.start()
     
-    print("Bot is starting polling...")
-    bot_app.run_polling(drop_pending_updates=True)
+    asyncio.run(set_wh())
 
 if __name__ == "__main__":
-    main()
+    setup_bot()
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+    
